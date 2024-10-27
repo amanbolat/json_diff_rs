@@ -7,7 +7,7 @@ pub enum EntryDifference {
     /// An entry from `target` that `source` is missing
     Missing { value: serde_json::Value },
     /// An entry that `source` has, and `target` doesn't
-    Extra,
+    Extra { value: serde_json::Value },
     /// The entry exists in both JSONs, but the values are different
     Value { value_diff: Difference },
 }
@@ -100,7 +100,11 @@ pub enum Difference {
 pub fn arrays(
     source: Vec<serde_json::Value>,
     target: Vec<serde_json::Value>,
+    filters: Vec<Filter>,
+    curr_path: Vec<ElementPath>,
 ) -> Option<ArrayDifference> {
+    // TODO: sort arrays if needed.
+    
     let mut source_iter = source.into_iter().enumerate().peekable();
     let mut target_iter = target.into_iter().peekable();
 
@@ -109,7 +113,12 @@ pub fn arrays(
         let (Some((i, source)), Some(target)) = (source_iter.next(), target_iter.next()) else {
             unreachable!("checked by peek()");
         };
-        different_pairs.push(values(source, target).map(|diff| (i, diff)));
+
+        let mut curr_path = curr_path.clone();
+        let curr_path: &mut Vec<ElementPath> = curr_path.as_mut();
+        curr_path.push(ElementPath::ArrayIndex(ArrayIndex::Index(i)));
+        
+        different_pairs.push(values(source, target, filters.clone(), curr_path.clone()).map(|diff| (i, diff)));
     }
     let different_pairs = different_pairs.into_iter().flatten().collect::<Vec<_>>();
     let different_pairs = if different_pairs.is_empty() {
@@ -142,15 +151,29 @@ pub fn arrays(
 pub fn objects(
     source: serde_json::Map<String, serde_json::Value>,
     mut target: serde_json::Map<String, serde_json::Value>,
+    filters: Vec<Filter>,
+    curr_path: Vec<ElementPath>,
 ) -> Option<DumbMap<String, EntryDifference>> {
     let mut value_differences = source
         .into_iter()
         .filter_map(|(key, source)| {
+            let mut curr_path = curr_path.clone();
+            let curr_path: &mut Vec<ElementPath> = curr_path.as_mut();
+            curr_path.push(ElementPath::Key(key.clone()));
+
             let Some(target) = target.remove(&key) else {
-                return Some((key, EntryDifference::Extra));
+                if ignore(&filters, &curr_path) {
+                    return None;
+                }
+
+                return Some((key, EntryDifference::Extra {
+                    value: source
+                }));
             };
 
-            values(source, target).map(|diff| (key, EntryDifference::Value { value_diff: diff }))
+
+
+            values(source, target, filters.clone(), curr_path.clone()).map(|diff| (key, EntryDifference::Value { value_diff: diff }))
         })
         .collect::<Vec<_>>();
 
@@ -184,8 +207,12 @@ impl From<serde_json::Value> for Type {
 }
 
 #[must_use]
-pub fn values(source: serde_json::Value, target: serde_json::Value) -> Option<Difference> {
+pub fn values(source: serde_json::Value, target: serde_json::Value, filters: Vec<Filter>, curr_path: Vec<ElementPath>) -> Option<Difference> {
     use serde_json::Value::{Array, Bool, Null, Number, Object, String};
+
+    if ignore(&filters, &curr_path) {
+        return None;
+    }
 
     match (source, target) {
         (Null, Null) => None,
@@ -219,8 +246,8 @@ pub fn values(source: serde_json::Value, target: serde_json::Value) -> Option<Di
                 }))
             }
         }
-        (Array(source), Array(target)) => arrays(source, target).map(Difference::Array),
-        (Object(source), Object(target)) => objects(source, target)
+        (Array(source), Array(target)) => arrays(source, target, filters, curr_path.clone()).map(Difference::Array),
+        (Object(source), Object(target)) => objects(source, target, filters, curr_path.clone())
             .map(|different_entries| Difference::Object { different_entries }),
         (source, target) => Some(Difference::Type {
             source_type: source.into(),
@@ -228,4 +255,42 @@ pub fn values(source: serde_json::Value, target: serde_json::Value) -> Option<Di
             target_value: target,
         }),
     }
+}
+
+fn ignore(filters: &Vec<Filter>, curr_path: &Vec<ElementPath>) -> bool {
+    let elem_path_filters: Vec<_> = filters.iter().filter_map(|x| {
+        match x {
+            Filter::Ignore(path) => { Some(path) }
+        }
+    }).collect();
+
+    elem_path_filters.iter().any(|&x| x.eq(curr_path))
+}
+
+#[derive(Eq, Clone, Debug)]
+pub enum ArrayIndex {
+    Index(usize),
+    All,
+}
+
+impl PartialEq for ArrayIndex {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ArrayIndex::Index(a), ArrayIndex::Index(b)) => a == b,
+            (ArrayIndex::All, ArrayIndex::Index(_)) => true,
+            (ArrayIndex::Index(_), ArrayIndex::All) => true,
+            (ArrayIndex::All, ArrayIndex::All) => true,
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Clone, Debug)]
+pub enum ElementPath {
+    Key(String),
+    ArrayIndex(ArrayIndex),
+}
+
+#[derive(Eq, PartialEq, Clone)]
+pub enum Filter {
+    Ignore(Vec<ElementPath>),
 }
