@@ -1,11 +1,11 @@
 [package]
-name = "serde_json_diff"
-description = "Create machine-readable JSON diffs"
-version = "0.2.0"
+name = "json_diff_rs"
+description = "JSON Diff for Rust"
+version = "0.0.1"
 license = "MIT"
 edition = "2021"
-documentation = "https://docs.rs/serde_json_diff"
-repository = "https://github.com/Teajey/serde_json_diff"
+documentation = "https://docs.rs/json_diff_rs"
+repository = "https://github.com/amanbolat/json_diff_rs"
 keywords = ["diff", "json", "serde", "serde_json"]
 
 [dependencies]
@@ -19,7 +19,3 @@ insta = "1.28.0"
 
 [features]
 cli = ["clap", "thiserror"]
-
-[[bin]]
-name = "serde_json_diff"
-required-features = ["cli"]

@@ -1,5 +1,5 @@
 use serde_json::json;
-use serde_json_diff::{ArrayIndex, ElementPath, Filter};
+use json_diff_rs::{ArrayIndex, ElementPath, Filter};
 
 #[test]
 fn ignore_field() {
@@ -20,7 +20,7 @@ fn ignore_field() {
         }
     });
 
-    let diff = serde_json_diff::objects(
+    let diff = json_diff_rs::objects(
         serde_json::from_value(user_1).unwrap(),
         serde_json::from_value(user_2).unwrap(),
         vec![
@@ -56,7 +56,7 @@ fn ignore_object_in_array() {
         ]
     });
 
-    let diff = serde_json_diff::objects(
+    let diff = json_diff_rs::objects(
         serde_json::from_value(data_1).unwrap(),
         serde_json::from_value(data_2).unwrap(),
         vec![
