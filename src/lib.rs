@@ -86,6 +86,7 @@ pub enum Difference {
     Scalar(ScalarDifference),
     Type {
         source_type: Type,
+        source_value: serde_json::Value,
         target_type: Type,
         target_value: serde_json::Value,
     },
@@ -171,8 +172,6 @@ pub fn objects(
                 }));
             };
 
-
-
             values(source, target, filters.clone(), curr_path.clone()).map(|diff| (key, EntryDifference::Value { value_diff: diff }))
         })
         .collect::<Vec<_>>();
@@ -250,7 +249,8 @@ pub fn values(source: serde_json::Value, target: serde_json::Value, filters: Vec
         (Object(source), Object(target)) => objects(source, target, filters, curr_path.clone())
             .map(|different_entries| Difference::Object { different_entries }),
         (source, target) => Some(Difference::Type {
-            source_type: source.into(),
+            source_type: source.clone().into(),
+            source_value: source,
             target_type: target.clone().into(),
             target_value: target,
         }),
