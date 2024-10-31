@@ -110,56 +110,49 @@ impl Diff {
     }
 
     #[must_use]
-    // FIXME: This feels pretty overwrought compared to `objects` and `values`. Maybe there's a better way to diff arrays...
     fn arrays(
         &self,
         source: Vec<serde_json::Value>,
         target: Vec<serde_json::Value>,
-        mut curr_path: Vec<ElementPath>,
+        curr_path: Vec<ElementPath>,
     ) -> Option<ArrayDifference> {
-    // TODO: sort arrays if needed.
-    
-    let mut source_iter = source.into_iter().enumerate().peekable();
-    let mut target_iter = target.into_iter().peekable();
-
-    let mut different_pairs = vec![];
-    while let (Some(_), Some(_)) = (source_iter.peek(), target_iter.peek()) {
-        let (Some((i, source)), Some(target)) = (source_iter.next(), target_iter.next()) else {
-            unreachable!("checked by peek()");
+        let different_pairs = self.compare_array_elements(&source, &target, &curr_path);
+        let different_pairs = if different_pairs.is_empty() {
+            None
+        } else {
+            Some(DumbMap(different_pairs))
         };
 
-        let mut curr_path = curr_path.clone();
-        let curr_path: &mut Vec<ElementPath> = curr_path.as_mut();
-        curr_path.push(ElementPath::ArrayIndex(ArrayIndex::Index(i)));
-        
-        different_pairs.push(self.values(source, target, curr_path.clone()).map(|diff| (i, diff)));
-    }
-    let different_pairs = different_pairs.into_iter().flatten().collect::<Vec<_>>();
-    let different_pairs = if different_pairs.is_empty() {
-        None
-    } else {
-        Some(DumbMap(different_pairs))
-    };
-
-    let extra_elements = source_iter.map(|(_, source)| source).collect::<Vec<_>>();
-    let missing_elements = target_iter.collect::<Vec<_>>();
-
-    if !extra_elements.is_empty() {
-        return Some(ArrayDifference::Longer {
-            different_pairs,
-            extra_length: extra_elements.len(),
-        });
+        match (source.len(), target.len()) {
+            (s, t) if s > t => Some(ArrayDifference::Longer {
+                different_pairs,
+                extra_length: s - t,
+            }),
+            (s, t) if s < t => Some(ArrayDifference::Shorter {
+                different_pairs,
+                missing_elements: target.into_iter().skip(s).collect(),
+            }),
+            _ => different_pairs.map(|pairs| ArrayDifference::PairsOnly { different_pairs: pairs }),
+        }
     }
 
-    if !missing_elements.is_empty() {
-        return Some(ArrayDifference::Shorter {
-            different_pairs,
-            missing_elements,
-        });
+    fn compare_array_elements(
+        &self,
+        source: &[serde_json::Value],
+        target: &[serde_json::Value],
+        curr_path: &[ElementPath],
+    ) -> Vec<(usize, Difference)> {
+        source
+            .iter()
+            .zip(target.iter())
+            .enumerate()
+            .filter_map(|(i, (s, t))| {
+                let mut path = curr_path.to_vec();
+                path.push(ElementPath::ArrayIndex(ArrayIndex::Index(i)));
+                self.values(s.clone(), t.clone(), path).map(|diff| (i, diff))
+            })
+            .collect()
     }
-
-    different_pairs.map(|different_pairs| ArrayDifference::PairsOnly { different_pairs })
-}
 
     #[must_use]
     fn objects(
