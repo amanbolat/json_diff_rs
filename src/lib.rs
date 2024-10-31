@@ -298,5 +298,10 @@ pub enum ElementPath {
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum Filter {
+    /// Completely ignore differences at the specified paths
     Ignore(Vec<ElementPath>),
+    /// Only compare values at the specified paths
+    Only(Vec<ElementPath>),
+    /// Ignore array ordering at the specified paths
+    IgnoreOrder(Vec<ElementPath>),
 }
