@@ -303,7 +303,7 @@ pub enum ElementPath {
     ArrayIndex(ArrayIndex),
 }
 
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub enum Filter {
     Ignore(Vec<ElementPath>),
 }
