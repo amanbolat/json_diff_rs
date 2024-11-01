@@ -1,4 +1,6 @@
 #![doc = include_str!("../README.md")]
+
+use derive_builder::Builder;
 use serde::{ser::SerializeMap, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -96,27 +98,31 @@ pub enum Difference {
     },
 }
 
+
+#[derive(Default, Builder, Debug)]
 pub struct Diff {
     filters: Vec<Filter>,
+
+    #[builder(setter(skip))]
+    #[builder(default = vec![])]
     curr_path: Vec<ElementPath>,
+
+    /// If true arrays with a length of zero will be equal, regardless of whether they are nil.
+    #[builder(setter(skip))]
+    #[builder(default = false)]
+    equate_empty_arrays: bool,
+    
+    source: serde_json::Value,
+    target: serde_json::Value,
 }
 
 impl Diff {
-    pub fn new(filters: Vec<Filter>) -> Self {
-        Self {
-            filters,
-            curr_path: Vec::new(),
-        }
-    }
-
-    #[must_use]
     fn arrays(
-        &self,
+        &mut self,
         source: Vec<serde_json::Value>,
         target: Vec<serde_json::Value>,
-        curr_path: Vec<ElementPath>,
     ) -> Option<ArrayDifference> {
-        let different_pairs = self.compare_array_elements(&source, &target, &curr_path);
+        let different_pairs = self.compare_array_elements(&source, &target);
         let different_pairs = if different_pairs.is_empty() {
             None
         } else {
@@ -137,64 +143,130 @@ impl Diff {
     }
 
     fn compare_array_elements(
-        &self,
+        &mut self,
         source: &[serde_json::Value],
         target: &[serde_json::Value],
-        curr_path: &[ElementPath],
     ) -> Vec<(usize, Difference)> {
-        source
+        let res: Vec<_> = source
             .iter()
             .zip(target.iter())
             .enumerate()
             .filter_map(|(i, (s, t))| {
-                let mut path = curr_path.to_vec();
-                path.push(ElementPath::ArrayIndex(ArrayIndex::Index(i)));
-                self.values(s.clone(), t.clone(), path).map(|diff| (i, diff))
+                let elem_path = ElementPath::ArrayIndex(ArrayIndex::Index(i));
+                if i > 0 { self.curr_path.pop(); }
+                self.curr_path.push(elem_path);
+                self.values(s.clone(), t.clone()).map(|diff| (i, diff))
             })
-            .collect()
+            .collect();
+        if res.len() != 0 {
+            self.curr_path.pop();
+        };
+
+        res
     }
 
     #[must_use]
     fn objects(
-        &self,
+        &mut self,
         source: serde_json::Map<String, serde_json::Value>,
         mut target: serde_json::Map<String, serde_json::Value>,
-        mut curr_path: Vec<ElementPath>,
     ) -> Option<DumbMap<String, EntryDifference>> {
-    let mut value_differences = source
-        .into_iter()
-        .filter_map(|(key, source)| {
-            let mut curr_path = curr_path.clone();
-            let curr_path: &mut Vec<ElementPath> = curr_path.as_mut();
-            curr_path.push(ElementPath::Key(key.clone()));
-
-            let Some(target) = target.remove(&key) else {
-                if ignore(&filters, &curr_path) {
-                    return None;
+        let mut is_first = true;
+        let mut value_differences = source
+            .into_iter()
+            .filter_map(|(key, source)| {
+                let elem_path = ElementPath::Key(key.clone());
+                match is_first {
+                    true => is_first = false,
+                    false => {self.curr_path.pop();}
                 }
+                self.curr_path.push(elem_path);
+                
+                let Some(target) = target.remove(&key) else {
+                    dbg!("objects: {:?} | {:?}", self.filters.clone(), self.curr_path.clone());
+                    if ignore(&self.filters, &self.curr_path) {
+                        return None;
+                    }
 
-                return Some((key, EntryDifference::Extra {
-                    value: source
-                }));
-            };
+                    return Some((key, EntryDifference::Extra {
+                        value: source
+                    }));
+                };
 
-            self.values(source, target, curr_path.clone()).map(|diff| (key, EntryDifference::Value { value_diff: diff }))
-        })
-        .collect::<Vec<_>>();
+                self.values(source, target).map(|diff| (key, EntryDifference::Value { value_diff: diff }))
+            })
+            .collect::<Vec<_>>();
 
-    value_differences.extend(target.into_iter().map(|(missing_key, missing_value)| {
-        (
-            missing_key,
-            EntryDifference::Missing {
-                value: missing_value,
-            },
-        )
-    }));
+        if value_differences.len() > 0 { self.curr_path.pop(); }
 
-    if value_differences.is_empty() {
-        None
-    } else {
-        Some(DumbMap(value_differences))
+        value_differences.extend(target.into_iter().map(|(missing_key, missing_value)| {
+            (
+                missing_key,
+                EntryDifference::Missing {
+                    value: missing_value,
+                },
+            )
+        }));
+
+        match value_differences.is_empty() {
+            true => None,
+            false => Some(DumbMap(value_differences))
+        }
+    }
+    
+    pub fn compare(mut self) -> Option<Difference>  {
+        self.values(self.source.clone(), self.target.clone())
+    } 
+
+    fn values(&mut self, source: serde_json::Value, target: serde_json::Value) -> Option<Difference> {
+        use serde_json::Value::{Array, Bool, Null, Number, Object, String};
+
+        if ignore(&self.filters, &self.curr_path) {
+            return None;
+        }
+
+        match (source, target) {
+            (Null, Null) => None,
+            (Bool(source), Bool(target)) => {
+                if source == target {
+                    None
+                } else {
+                    Some(Difference::Scalar(ScalarDifference::Bool {
+                        source,
+                        target,
+                    }))
+                }
+            }
+            (Number(source), Number(target)) => {
+                if source == target {
+                    None
+                } else {
+                    Some(Difference::Scalar(ScalarDifference::Number {
+                        source,
+                        target,
+                    }))
+                }
+            }
+            (String(source), String(target)) => {
+                if source == target {
+                    None
+                } else {
+                    Some(Difference::Scalar(ScalarDifference::String {
+                        source,
+                        target,
+                    }))
+                }
+            }
+            (Array(source), Array(target)) => self.arrays(source, target).map(Difference::Array),
+            (Object(source), Object(target)) => self.objects(source, target)
+                .map(|different_entries| Difference::Object { different_entries }),
+            (source, target) => Some(Difference::Type {
+                source_type: source.clone().into(),
+                source_value: source,
+                target_type: target.clone().into(),
+                target_value: target,
+            }),
+        }
     }
 }
 
@@ -208,58 +280,6 @@ impl From<serde_json::Value> for Type {
             serde_json::Value::Array(_) => Type::Array,
             serde_json::Value::Object(_) => Type::Object,
         }
-    }
-}
-
-    #[must_use]
-    pub fn values(&self, source: serde_json::Value, target: serde_json::Value, mut curr_path: Vec<ElementPath>) -> Option<Difference> {
-    use serde_json::Value::{Array, Bool, Null, Number, Object, String};
-
-    if ignore(&filters, &curr_path) {
-        return None;
-    }
-
-    match (source, target) {
-        (Null, Null) => None,
-        (Bool(source), Bool(target)) => {
-            if source == target {
-                None
-            } else {
-                Some(Difference::Scalar(ScalarDifference::Bool {
-                    source,
-                    target,
-                }))
-            }
-        }
-        (Number(source), Number(target)) => {
-            if source == target {
-                None
-            } else {
-                Some(Difference::Scalar(ScalarDifference::Number {
-                    source,
-                    target,
-                }))
-            }
-        }
-        (String(source), String(target)) => {
-            if source == target {
-                None
-            } else {
-                Some(Difference::Scalar(ScalarDifference::String {
-                    source,
-                    target,
-                }))
-            }
-        }
-        (Array(source), Array(target)) => self.arrays(source, target, curr_path.clone()).map(Difference::Array),
-        (Object(source), Object(target)) => self.objects(source, target, curr_path.clone())
-            .map(|different_entries| Difference::Object { different_entries }),
-        (source, target) => Some(Difference::Type {
-            source_type: source.clone().into(),
-            source_value: source,
-            target_type: target.clone().into(),
-            target_value: target,
-        }),
     }
 }
 
@@ -300,8 +320,4 @@ pub enum ElementPath {
 pub enum Filter {
     /// Completely ignore differences at the specified paths
     Ignore(Vec<ElementPath>),
-    /// Only compare values at the specified paths
-    Only(Vec<ElementPath>),
-    /// Ignore array ordering at the specified paths
-    IgnoreOrder(Vec<ElementPath>),
 }

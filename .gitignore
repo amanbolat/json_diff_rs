@@ -4,3 +4,4 @@
 *.snap.new
 
 .helix
+.aider*

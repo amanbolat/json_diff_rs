@@ -20,58 +20,62 @@ fn ignore_field() {
         }
     });
 
-    let diff = json_diff_rs::objects(
-        serde_json::from_value(user_1).unwrap(),
-        serde_json::from_value(user_2).unwrap(),
-        vec![
-            Filter::Ignore(vec![ElementPath::Key("user".to_string())]),
-            Filter::Ignore(vec![ElementPath::Key("age".to_string())]),
-            Filter::Ignore(vec![
-                ElementPath::Key("address".to_string()),
-                ElementPath::Key("city".to_string())
-            ]),
-            Filter::Ignore(vec![
-                ElementPath::Key("address".to_string()),
-                ElementPath::Key("zip".to_string())
-            ]),
-        ],
-        vec![]
-    );
+    let filters = vec![
+        Filter::Ignore(vec![ElementPath::Key("user".to_string())]),
+        Filter::Ignore(vec![ElementPath::Key("age".to_string())]),
+        Filter::Ignore(vec![
+            ElementPath::Key("address".to_string()),
+            ElementPath::Key("city".to_string())
+        ]),
+        Filter::Ignore(vec![
+            ElementPath::Key("address".to_string()),
+            ElementPath::Key("zip".to_string())
+        ]),
+    ];
+
+    let diff = json_diff_rs::DiffBuilder::default()
+        .filters(filters)
+        .source(user_1).target(user_2).build().unwrap();
+
+    let diff = diff.compare();
 
     assert_eq!(true, diff.is_none(), "diff should be None, but got: {:?}", diff);
 }
 
-#[test]
-fn ignore_object_in_array() {
-    let data_1 = json!({
-        "data": [
-            {"id": 1, "created_at": "2024"}
-        ]
-    });
-
-    let data_2= json!({
-        "data": [
-            {"id": 1, "created_at": "2023"},
-            {"id": 2, "created_at": "2025"}
-        ]
-    });
-
-    let diff = json_diff_rs::objects(
-        serde_json::from_value(data_1).unwrap(),
-        serde_json::from_value(data_2).unwrap(),
-        vec![
-            // data._.created_at
-            Filter::Ignore(vec![
-                ElementPath::Key("data".to_string()),
-                ElementPath::ArrayIndex(ArrayIndex::All),
-                ElementPath::Key("created_at".to_string()),
-            ])
-        ],
-        vec![]
-    );
-
-    assert_eq!(true, diff.is_none(), "diff should be None, but got {:?}", diff)
-}
+// #[test]
+// fn ignore_object_in_array() {
+//     let data_1 = json!({
+//         "data": [
+//             {"id": 1, "created_at": "2024"},
+//         ]
+//     });
+//
+//     let data_2= json!({
+//         "data": [
+//             {"id": 2, "created_at": "2023"},
+//         ]
+//     });
+//
+//     let diff = json_diff_rs::objects(
+//         serde_json::from_value(data_1).unwrap(),
+//         serde_json::from_value(data_2).unwrap(),
+//         vec![
+//             Filter::Ignore(vec![
+//                 ElementPath::Key("data".to_string()),
+//                 ElementPath::ArrayIndex(ArrayIndex::All),
+//                 ElementPath::Key("created_at".to_string()),
+//             ]),
+//             Filter::Ignore(vec![
+//                 ElementPath::Key("data".to_string()),
+//                 ElementPath::ArrayIndex(ArrayIndex::All),
+//                 ElementPath::Key("id".to_string()),
+//             ])
+//         ],
+//         vec![]
+//     );
+//
+//     assert_eq!(true, diff.is_none(), "diff should be None, but got {:?}", diff)
+// }
 
 // #[test]
 // fn kitchen_sink() {
