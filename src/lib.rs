@@ -2,11 +2,11 @@
 
 mod element_path_parser;
 
-use std::ops::{Deref, DerefMut, Neg};
+use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 use std::time::Duration;
 use approx::relative_eq;
-use chrono::{DateTime, ParseResult};
+use chrono::{DateTime};
 use derive_builder::Builder;
 use serde::{ser::SerializeMap, Serialize};
 use serde_json::Number;
@@ -292,8 +292,8 @@ impl Diff {
         if !self.approx_date_time_eq_duration.is_zero() {
             let source_datetime = DateTime::parse_from_rfc3339(source.as_str());
             let target_datetime = DateTime::parse_from_rfc3339(target.as_str());
-            
-            match (source_datetime, target_datetime) { 
+
+            match (source_datetime, target_datetime) {
                 (Ok(source_date_time), Ok(target_date_time)) => {
                     let delta = source_date_time - target_date_time;
                     let delta = delta.abs().to_std().unwrap();
@@ -302,7 +302,7 @@ impl Diff {
                             source,
                             target,
                         }))
-                    } else { 
+                    } else {
                         return None
                     }
                 },
@@ -559,7 +559,7 @@ mod tests {
 
         assert_eq!(true, diff.is_none(), "diff should be None, but got: {:?}", diff);
     }
-    
+
     #[test]
     fn approx_date_time_eq() {
         let obj1 = json!({
