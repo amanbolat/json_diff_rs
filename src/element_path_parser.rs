@@ -1,8 +1,8 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while1},
-    character::complete::{char, digit1},
-    combinator::{map, map_res},
+    bytes::complete::{take_while1},
+    character::complete::{char},
+    combinator::{map},
     multi::separated_list1,
     sequence::preceded,
     IResult,
@@ -13,24 +13,6 @@ fn parse_escaped_underscore(input: &str) -> IResult<&str, PathElement> {
     map(
         preceded(char('\\'), char('_')),
         |_| PathElement::Key("_".to_string())
-    )(input)
-}
-
-fn parse_all_array(input: &str) -> IResult<&str, PathElement> {
-    map(tag("_"), |_| PathElement::ArrayIndex(ArrayIndex::All))(input)
-}
-
-fn parse_array_index(input: &str) -> IResult<&str, PathElement> {
-    map_res(digit1, |s: &str| {
-        s.parse::<usize>()
-            .map(|n| PathElement::ArrayIndex(ArrayIndex::Index(n)))
-    })(input)
-}
-
-fn parse_key(input: &str) -> IResult<&str, PathElement> {
-    map(
-        take_while1(|c: char| c.is_alphanumeric() || c == '_'),
-        |s: &str| PathElement::Key(s.to_string()),
     )(input)
 }
 
