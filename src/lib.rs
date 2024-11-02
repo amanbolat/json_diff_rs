@@ -497,7 +497,7 @@ mod tests {
             .ignore_path("user")
             .ignore_path("address.city")
             .ignore_path("address.zip")
-            .ignore_path("object_array._.a")
+            .ignore_path("object_array.[_].a")
             .ignore_path_with_missing("target_missing_value", true)
             .equate_empty_arrays(true)
             .source(user_1)
