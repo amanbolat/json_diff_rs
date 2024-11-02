@@ -1,7 +1,7 @@
 [package]
 name = "json_diff_rs"
 description = "JSON Diff for Rust"
-version = "0.0.3"
+version = "0.0.4"
 license = "MIT"
 edition = "2021"
 documentation = "https://docs.rs/json_diff_rs"
