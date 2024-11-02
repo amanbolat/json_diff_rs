@@ -1,60 +1,106 @@
-use nom::{
-    branch::alt,
-    bytes::complete::{take_while1},
-    character::complete::{char},
-    combinator::{map},
-    multi::separated_list1,
-    sequence::preceded,
-    IResult,
-};
 use crate::{ArrayIndex, PathElement};
 
-fn parse_escaped_underscore(input: &str) -> IResult<&str, PathElement> {
-    map(
-        preceded(char('\\'), char('_')),
-        |_| PathElement::Key("_".to_string())
-    )(input)
-}
+pub fn parse_element_path(s: &str) -> Result<Vec<PathElement>, String> {
+    if s.is_empty() {
+        return Err("Empty path is not allowed".to_string());
+    }
 
-fn parse_element(input: &str) -> IResult<&str, PathElement> {
-    alt((
-        parse_escaped_underscore,
-        map(
-            take_while1(|c: char| c.is_alphanumeric() || c == '_'),
-            |s: &str| {
-                if s == "_" {
-                    PathElement::ArrayIndex(ArrayIndex::All)
+    let mut result = Vec::new();
+    let mut chars = s.chars().peekable();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut in_brackets = false;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                if in_quotes {
+                    if current.is_empty() {
+                        return Err("Empty quoted string is not allowed".to_string());
+                    }
+                    result.push(PathElement::Key(current.clone()));
+                    current.clear();
+                    in_quotes = false;
                 } else {
-                    PathElement::Key(s.to_string())
+                    if !current.is_empty() {
+                        return Err("Unexpected quote".to_string());
+                    }
+                    in_quotes = true;
                 }
             }
-        ),
-    ))(input)
-}
-
-fn parse_path(input: &str) -> IResult<&str, Vec<PathElement>> {
-    separated_list1(char('.'), parse_element)(input)
-}
-
-pub(crate) fn parse_element_path(input: &str) -> Result<Vec<PathElement>, String> {
-    match parse_path(input) {
-        Ok((remaining, result)) => {
-            if remaining.is_empty() {
-                Ok(result)
-            } else {
-                Err(format!("Unparsed input remaining: {}", remaining))
+            '.' => {
+                if in_quotes {
+                    current.push(c);
+                } else {
+                    if !current.is_empty() {
+                        result.push(PathElement::Key(current.clone()));
+                        current.clear();
+                    } else if result.is_empty() {
+                        return Err("Path cannot start with a dot".to_string());
+                    }
+                }
+            }
+            '[' => {
+                if in_quotes {
+                    current.push(c);
+                } else {
+                    if !current.is_empty() {
+                        result.push(PathElement::Key(current.clone()));
+                        current.clear();
+                    }
+                    in_brackets = true;
+                }
+            }
+            ']' => {
+                if in_quotes {
+                    current.push(c);
+                } else if in_brackets {
+                    if current == "_" {
+                        result.push(PathElement::ArrayIndex(ArrayIndex::All));
+                    } else {
+                        match current.parse::<usize>() {
+                            Ok(index) => result.push(PathElement::ArrayIndex(ArrayIndex::Index(index))),
+                            Err(_) => return Err(format!("Invalid array index: {}", current)),
+                        }
+                    }
+                    current.clear();
+                    in_brackets = false;
+                } else {
+                    return Err("Unexpected closing bracket".to_string());
+                }
+            }
+            _ => {
+                current.push(c);
             }
         }
-        Err(e) => Err(format!("Parsing error: {}", e)),
     }
+
+    if in_quotes {
+        return Err("Unclosed quote".to_string());
+    }
+
+    if in_brackets {
+        return Err("Unclosed bracket".to_string());
+    }
+
+    if !current.is_empty() {
+        result.push(PathElement::Key(current));
+    }
+
+    if result.is_empty() {
+        return Err("Empty path is not allowed".to_string());
+    }
+
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::{ArrayIndex, PathElement};
     use super::*;
 
     #[test]
-    fn test_path_parsing() {
+    fn test_parse_element_path() {
         assert_eq!(
             parse_element_path("a.b.c").unwrap(),
             vec![
@@ -65,7 +111,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_element_path("_.a.c").unwrap(),
+            parse_element_path("[_].a.c").unwrap(),
             vec![
                 PathElement::ArrayIndex(ArrayIndex::All),
                 PathElement::Key("a".to_string()),
@@ -74,28 +120,34 @@ mod tests {
         );
 
         assert_eq!(
-            parse_element_path(r"\_.field_1._1").unwrap(),
+            parse_element_path("'[_]'.a").unwrap(),
             vec![
-                PathElement::Key("_".to_string()),
-                PathElement::Key("field_1".to_string()),
-                PathElement::Key("_1".to_string())
+                PathElement::Key("[_]".to_string()),
+                PathElement::Key("a".to_string())
             ]
         );
 
         assert_eq!(
-            parse_element_path(r"\_.\_._1_").unwrap(),
+            parse_element_path("a.[1]").unwrap(),
             vec![
-                PathElement::Key("_".to_string()),
-                PathElement::Key("_".to_string()),
-                PathElement::Key("_1_".to_string())
+                PathElement::Key("a".to_string()),
+                PathElement::ArrayIndex(ArrayIndex::Index(1))
             ]
         );
 
         assert_eq!(
-            parse_element_path(r"__").unwrap(),
+            parse_element_path("a.'.'.b").unwrap(),
             vec![
-                PathElement::Key("__".to_string()),
+                PathElement::Key("a".to_string()),
+                PathElement::Key(".".to_string()),
+                PathElement::Key("b".to_string())
             ]
         );
+
+        assert!(parse_element_path("").is_err());
+        assert!(parse_element_path("''").is_err());
+        assert!(parse_element_path("a.'").is_err());
+        assert!(parse_element_path("a.[").is_err());
+        assert!(parse_element_path("a.[x]").is_err());
     }
 }
