@@ -2,9 +2,11 @@
 
 mod element_path_parser;
 
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Neg};
 use std::str::FromStr;
+use std::time::Duration;
 use approx::relative_eq;
+use chrono::{DateTime, ParseResult};
 use derive_builder::Builder;
 use serde::{ser::SerializeMap, Serialize};
 use serde_json::Number;
@@ -121,6 +123,9 @@ pub struct Diff {
 
     #[builder(default = 0.0)]
     approx_float_eq_epsilon: f64,
+
+    #[builder(default = Duration::from_millis(0))]
+    approx_date_time_eq_duration: Duration,
 
     source: serde_json::Value,
     target: serde_json::Value,
@@ -262,14 +267,7 @@ impl Diff {
                 self.compare_numbers(source, target)
             }
             (String(source), String(target)) => {
-                if source == target {
-                    None
-                } else {
-                    Some(Difference::Scalar(ScalarDifference::String {
-                        source,
-                        target,
-                    }))
-                }
+                self.compare_strings(source, target)
             }
             (Array(source), Array(target)) => self.arrays(source, target).map(Difference::Array),
             (Object(source), Object(target)) => {
@@ -286,6 +284,38 @@ impl Diff {
                     target_value: target,
                 })
             }
+        }
+    }
+
+
+    fn compare_strings(&self, source:String, target: String) -> Option<Difference> {
+        if !self.approx_date_time_eq_duration.is_zero() {
+            let source_datetime = DateTime::parse_from_rfc3339(source.as_str());
+            let target_datetime = DateTime::parse_from_rfc3339(target.as_str());
+            
+            match (source_datetime, target_datetime) { 
+                (Ok(source_date_time), Ok(target_date_time)) => {
+                    let delta = source_date_time - target_date_time;
+                    let delta = delta.abs().to_std().unwrap();
+                    if delta.gt(&self.approx_date_time_eq_duration) {
+                        return Some(Difference::Scalar(ScalarDifference::String {
+                            source,
+                            target,
+                        }))
+                    } else { 
+                        return None
+                    }
+                },
+                (_, _) => {},
+            }
+        }
+        if source == target {
+            None
+        } else {
+            Some(Difference::Scalar(ScalarDifference::String {
+                source,
+                target,
+            }))
         }
     }
 
@@ -409,6 +439,7 @@ impl TryFrom<&str> for Path {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use serde_json::json;
     use crate::DiffBuilder;
 
@@ -522,6 +553,25 @@ mod tests {
 
         let diff = DiffBuilder::default()
             .approx_float_eq_epsilon(0.001)
+            .source(obj1).target(obj2).build().unwrap();
+
+        let diff = diff.compare();
+
+        assert_eq!(true, diff.is_none(), "diff should be None, but got: {:?}", diff);
+    }
+    
+    #[test]
+    fn approx_date_time_eq() {
+        let obj1 = json!({
+            "ts": "2023-07-25T15:30:01Z"
+        });
+
+        let obj2 = json!({
+            "ts": "2023-07-25T15:30:00Z"
+        });
+
+        let diff = DiffBuilder::default()
+            .approx_date_time_eq_duration(Duration::from_secs(1))
             .source(obj1).target(obj2).build().unwrap();
 
         let diff = diff.compare();
